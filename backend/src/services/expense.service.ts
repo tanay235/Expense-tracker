@@ -81,3 +81,18 @@ export async function listExpensesByUser(params: {
     },
   };
 }
+
+export async function summarizeExpensesByCategory(userId: string) {
+  const normalizedUserId = new Types.ObjectId(userId);
+
+  // Aggregation groups documents by category and sums amount (stored in paise) in one DB pass.
+  // Doing this server-side avoids shipping all rows to the client just to compute totals.
+  const summary = await ExpenseModel.aggregate<{ category: string; total: number }>([
+    { $match: { user_id: normalizedUserId } },
+    { $group: { _id: '$category', total: { $sum: '$amount' } } },
+    { $project: { _id: 0, category: '$_id', total: 1 } },
+    { $sort: { total: -1 } },
+  ]);
+
+  return { summary };
+}

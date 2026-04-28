@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 
 import { createExpenseSchema } from '../schemas/expense.schema';
-import { createExpenseWithIdempotency, listExpensesByUser } from '../services/expense.service';
+import { createExpenseWithIdempotency, listExpensesByUser, summarizeExpensesByCategory } from '../services/expense.service';
 
 export async function createExpenseController(req: Request, res: Response): Promise<void> {
   const authUser = req.authUser;
@@ -59,5 +59,17 @@ export async function listExpensesController(req: Request, res: Response): Promi
     category,
   });
 
+  res.status(200).json(result);
+}
+
+export async function expenseSummaryController(req: Request, res: Response): Promise<void> {
+  const authUser = req.authUser;
+  if (!authUser) {
+    res.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  const result = await summarizeExpensesByCategory(authUser.userId);
+  // Category totals help users quickly understand spending distribution without scanning every row.
   res.status(200).json(result);
 }

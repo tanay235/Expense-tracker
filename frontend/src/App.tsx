@@ -20,6 +20,15 @@ type ExpenseListResponse = {
   };
 };
 
+type ExpenseSummaryRow = {
+  category: string;
+  total: number;
+};
+
+type ExpenseSummaryResponse = {
+  summary: ExpenseSummaryRow[];
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000';
 const TOKEN_STORAGE_KEY = 'expense_tracker_token';
 
@@ -62,6 +71,7 @@ function App() {
   const [date, setDate] = useState('');
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [summaryByCategory, setSummaryByCategory] = useState<ExpenseSummaryRow[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [isListLoading, setIsListLoading] = useState(false);
@@ -74,6 +84,7 @@ function App() {
   useEffect(() => {
     if (!token) {
       setExpenses([]);
+      setSummaryByCategory([]);
       return;
     }
 
@@ -97,8 +108,10 @@ function App() {
         { method: 'GET' },
         authToken
       );
+      const summaryResult = await apiRequest<ExpenseSummaryResponse>('/expenses/summary', { method: 'GET' }, authToken);
 
       setExpenses(result.items);
+      setSummaryByCategory(summaryResult.summary);
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Failed to load expenses');
     } finally {
@@ -288,6 +301,21 @@ function App() {
                       <div className="muted">{expense.description || 'No description'}</div>
                     </div>
                     <span>{new Date(expense.date).toLocaleDateString()}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+
+          <section className="card">
+            <h2>Summary by Category</h2>
+            {!isListLoading && summaryByCategory.length === 0 ? <p>No summary data yet.</p> : null}
+            {!isListLoading && summaryByCategory.length > 0 ? (
+              <ul className="expense-list">
+                {summaryByCategory.map((entry) => (
+                  <li key={entry.category}>
+                    <strong>{entry.category}</strong>
+                    <span>{formatRupeesFromPaise(entry.total)}</span>
                   </li>
                 ))}
               </ul>
