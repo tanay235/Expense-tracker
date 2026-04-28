@@ -10,23 +10,37 @@ export async function createExpenseWithIdempotency(params: {
 }) {
   const { payload, userId, idempotencyKey } = params;
   const normalizedUserId = new Types.ObjectId(userId);
-
-  const existing = await ExpenseModel.findOne({
+  // Idempotency handles real-world retry scenarios: if client/network times out after create,
+  // the client can resend the same request key and safely receive the original result.
+  const lookup = {
     idempotency_key: idempotencyKey,
-    user_id: normalizedUserId
-  }).lean();
+    user_id: normalizedUserId,
+  };
 
+  const existing = await ExpenseModel.findOne(lookup).lean();
   if (existing) {
-    return { expense: existing, deduplicated: true };
+    return { expense: existing };
   }
 
-  const created = await ExpenseModel.create({
-    ...payload,
-    idempotency_key: idempotencyKey,
-    user_id: normalizedUserId
-  });
+  try {
+    const created = await ExpenseModel.create({
+      ...payload,
+      idempotency_key: idempotencyKey,
+      user_id: normalizedUserId,
+    });
 
-  return { expense: created.toObject(), deduplicated: false };
+    return { expense: created.toObject() };
+  } catch (error) {
+    // Duplicate prevention is critical for finance data: retry storms must not double-charge totals.
+    // Unique (idempotency_key, user_id) ensures only one row wins; losers read and return that row.
+    if ((error as { code?: number }).code === 11000) {
+      const winner = await ExpenseModel.findOne(lookup).lean();
+      if (winner) {
+        return { expense: winner };
+      }
+    }
+    throw error;
+  }
 }
 
 export async function listExpensesByUser(params: {

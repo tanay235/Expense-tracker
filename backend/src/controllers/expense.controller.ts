@@ -28,7 +28,8 @@ export async function createExpenseController(req: Request, res: Response): Prom
     idempotencyKey,
   });
 
-  res.status(result.deduplicated ? 200 : 201).json(result);
+  // For the same user + idempotency key we always return the same resource response.
+  res.status(201).json(result);
 }
 
 export async function listExpensesController(req: Request, res: Response): Promise<void> {
