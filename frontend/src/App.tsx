@@ -64,7 +64,9 @@ function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isListLoading, setIsListLoading] = useState(false);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [isExpenseSubmitting, setIsExpenseSubmitting] = useState(false);
   const [requestError, setRequestError] = useState('');
 
   // Local component state is enough here because auth + expense data are used on a single page.
@@ -79,7 +81,7 @@ function App() {
   }, [token, categoryFilter]);
 
   async function loadExpenses(authToken: string, selectedCategory: string): Promise<void> {
-    setIsLoading(true);
+    setIsListLoading(true);
     setRequestError('');
 
     try {
@@ -100,12 +102,16 @@ function App() {
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Failed to load expenses');
     } finally {
-      setIsLoading(false);
+      setIsListLoading(false);
     }
   }
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (isAuthSubmitting) {
+      return;
+    }
+    setIsAuthSubmitting(true);
     setRequestError('');
     setStatusMessage('');
 
@@ -132,15 +138,20 @@ function App() {
       setPassword('');
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Authentication failed');
+    } finally {
+      setIsAuthSubmitting(false);
     }
   }
 
   async function handleExpenseSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!token) {
+    if (!token || isExpenseSubmitting) {
       return;
     }
 
+    // Disabling submit while a request is in-flight prevents accidental double-click duplicates.
+    // This improves UX reliability by giving deterministic feedback during slow network calls.
+    setIsExpenseSubmitting(true);
     setRequestError('');
     setStatusMessage('');
 
@@ -168,6 +179,8 @@ function App() {
       await loadExpenses(token, categoryFilter);
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Failed to add expense');
+    } finally {
+      setIsExpenseSubmitting(false);
     }
   }
 
@@ -202,9 +215,16 @@ function App() {
                 required
               />
             </label>
-            <button type="submit">{authMode === 'login' ? 'Login' : 'Create account'}</button>
+            <button type="submit" disabled={isAuthSubmitting}>
+              {isAuthSubmitting ? 'Please wait...' : authMode === 'login' ? 'Login' : 'Create account'}
+            </button>
           </form>
-          <button type="button" className="link-button" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+          <button
+            type="button"
+            className="link-button"
+            disabled={isAuthSubmitting}
+            onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+          >
             {authMode === 'login' ? 'Need an account? Register' : 'Already have an account? Login'}
           </button>
         </section>
@@ -241,7 +261,9 @@ function App() {
                 Date
                 <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
               </label>
-              <button type="submit">Add expense</button>
+              <button type="submit" disabled={isExpenseSubmitting}>
+                {isExpenseSubmitting ? 'Saving...' : 'Add expense'}
+              </button>
             </form>
           </section>
 
@@ -255,9 +277,9 @@ function App() {
             </div>
             <p className="total">Total (current list): {formatRupeesFromPaise(totalPaise)}</p>
 
-            {isLoading ? <p>Loading expenses...</p> : null}
-            {!isLoading && expenses.length === 0 ? <p>No expenses found.</p> : null}
-            {!isLoading && expenses.length > 0 ? (
+            {isListLoading ? <p>Loading expenses...</p> : null}
+            {!isListLoading && expenses.length === 0 ? <p>No expenses found.</p> : null}
+            {!isListLoading && expenses.length > 0 ? (
               <ul className="expense-list">
                 {expenses.map((expense) => (
                   <li key={expense._id}>
