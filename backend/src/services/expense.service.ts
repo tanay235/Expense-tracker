@@ -28,3 +28,28 @@ export async function createExpenseWithIdempotency(params: {
 
   return { expense: created.toObject(), deduplicated: false };
 }
+
+export async function listExpensesByUser(params: {
+  userId: string;
+  page: number;
+  limit: number;
+}) {
+  const { userId, page, limit } = params;
+  const normalizedUserId = new Types.ObjectId(userId);
+
+  const skip = (page - 1) * limit;
+  const [items, total] = await Promise.all([
+    ExpenseModel.find({ user_id: normalizedUserId }).sort({ date: -1, created_at: -1 }).skip(skip).limit(limit).lean(),
+    ExpenseModel.countDocuments({ user_id: normalizedUserId }),
+  ]);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
