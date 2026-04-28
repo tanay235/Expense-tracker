@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import './style.css';
 
 type Expense = {
@@ -84,11 +84,17 @@ function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summaryByCategory, setSummaryByCategory] = useState<ExpenseSummaryRow[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [categorySearchInput, setCategorySearchInput] = useState('');
+  const [showCategorySuggestions, setShowCategorySuggestions] = useState(false);
+  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
+  const [expenseSortOrder, setExpenseSortOrder] = useState<'newest' | 'oldest'>('newest');
   const [statusMessage, setStatusMessage] = useState('');
   const [isListLoading, setIsListLoading] = useState(false);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [isExpenseSubmitting, setIsExpenseSubmitting] = useState(false);
   const [requestError, setRequestError] = useState('');
+
+  const categoryFilterContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Local component state is enough here because auth + expense data are used on a single page.
   // This keeps the frontend simple and avoids introducing global state tooling prematurely.
@@ -101,6 +107,36 @@ function App() {
 
     void loadExpenses(token, categoryFilter);
   }, [token, categoryFilter]);
+
+  useEffect(() => {
+    if (!showCategorySuggestions) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent): void => {
+      const container = categoryFilterContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const targetNode = event.target as Node | null;
+      if (!targetNode) {
+        return;
+      }
+
+      if (!container.contains(targetNode)) {
+        setShowCategorySuggestions(false);
+        setHighlightedSuggestionIndex(-1);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [showCategorySuggestions]);
 
   async function loadExpenses(authToken: string, selectedCategory: string): Promise<void> {
     setIsListLoading(true);
@@ -209,7 +245,7 @@ function App() {
           method: 'POST',
           headers: { 'Idempotency-Key': crypto.randomUUID() },
           body: JSON.stringify({
-            amount: Number(amount),
+            amount: Math.round(Number(amount) * 100), // Convert Rupees to Paise
             category,
             description: description || undefined,
             date,
@@ -233,6 +269,100 @@ function App() {
 
   const totalPaise = useMemo(() => expenses.reduce((sum, item) => sum + item.amount, 0), [expenses]);
 
+  const availableCategories = useMemo(() => {
+    const categories = new Set<string>();
+
+    summaryByCategory.forEach((entry) => {
+      if (entry.category && entry.category.trim()) {
+        categories.add(entry.category.trim());
+      }
+    });
+
+    expenses.forEach((expense) => {
+      if (expense.category && expense.category.trim()) {
+        categories.add(expense.category.trim());
+      }
+    });
+
+    return Array.from(categories).sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: 'base' })
+    );
+  }, [expenses, summaryByCategory]);
+
+  type CategorySuggestion = {
+    category: string;
+    matchIndex: number;
+    matchLength: number;
+  };
+
+  const filteredCategorySuggestions = useMemo<CategorySuggestion[]>(() => {
+    const trimmedSearch = categorySearchInput.trim();
+    if (!trimmedSearch) {
+      return availableCategories.map((category) => ({ category, matchIndex: -1, matchLength: 0 }));
+    }
+
+    const searchTerm = trimmedSearch.toLowerCase();
+    const matches: Array<CategorySuggestion & { score: number; matchOffset: number }> = [];
+
+    for (const category of availableCategories) {
+      const normalizedCategory = category.toLowerCase();
+      const matchIndex = normalizedCategory.indexOf(searchTerm);
+      if (matchIndex === -1) {
+        continue;
+      }
+
+      // Relevance heuristic:
+      // - exact/prefix matches first
+      // - then word-boundary matches (e.g. "fast food" matches "food")
+      // - then any other substring matches
+      let score = 3;
+      if (matchIndex === 0) {
+        score = normalizedCategory.length === searchTerm.length ? 0 : 1;
+      } else {
+        const prevChar = normalizedCategory[matchIndex - 1];
+        if (prevChar === ' ' || prevChar === '-' || prevChar === '_' || prevChar === '/') {
+          score = 2;
+        }
+      }
+
+      matches.push({
+        category,
+        matchIndex,
+        matchLength: searchTerm.length,
+        score,
+        matchOffset: matchIndex,
+      });
+    }
+
+    matches.sort((left, right) => {
+      if (left.score !== right.score) {
+        return left.score - right.score;
+      }
+      if (left.matchOffset !== right.matchOffset) {
+        return left.matchOffset - right.matchOffset;
+      }
+      return left.category.localeCompare(right.category, undefined, { sensitivity: 'base' });
+    });
+
+    return matches.map(({ category, matchIndex, matchLength }) => ({ category, matchIndex, matchLength }));
+  }, [availableCategories, categorySearchInput]);
+
+  useEffect(() => {
+    if (!showCategorySuggestions) {
+      return;
+    }
+
+    setHighlightedSuggestionIndex((currentIndex) => {
+      if (filteredCategorySuggestions.length === 0) {
+        return -1;
+      }
+      if (currentIndex < 0) {
+        return 0;
+      }
+      return Math.min(currentIndex, filteredCategorySuggestions.length - 1);
+    });
+  }, [filteredCategorySuggestions, showCategorySuggestions]);
+
   function handleLogout(): void {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     localStorage.removeItem(USER_NAME_STORAGE_KEY);
@@ -243,6 +373,85 @@ function App() {
     setStatusMessage('✓ Logged out successfully.');
     setRequestError('');
   }
+
+  function handleSelectCategory(selectedCategory: string): void {
+    setCategoryFilter(selectedCategory);
+    setCategorySearchInput(selectedCategory);
+    setShowCategorySuggestions(false);
+    setHighlightedSuggestionIndex(-1);
+  }
+
+  function handleClearFilter(): void {
+    setCategoryFilter('');
+    setCategorySearchInput('');
+    setShowCategorySuggestions(false);
+    setHighlightedSuggestionIndex(-1);
+  }
+
+  function renderCategorySuggestionLabel(suggestion: CategorySuggestion): ReactNode {
+    if (suggestion.matchIndex < 0 || suggestion.matchLength <= 0) {
+      return suggestion.category;
+    }
+
+    const beforeMatch = suggestion.category.slice(0, suggestion.matchIndex);
+    const matchText = suggestion.category.slice(suggestion.matchIndex, suggestion.matchIndex + suggestion.matchLength);
+    const afterMatch = suggestion.category.slice(suggestion.matchIndex + suggestion.matchLength);
+
+    return (
+      <>
+        {beforeMatch}
+        <mark className="match-mark">{matchText}</mark>
+        {afterMatch}
+      </>
+    );
+  }
+
+  function handleCategorySearchKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === 'Escape') {
+      setShowCategorySuggestions(false);
+      setHighlightedSuggestionIndex(-1);
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setShowCategorySuggestions(true);
+      setHighlightedSuggestionIndex((currentIndex) => {
+        const nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
+        return Math.min(nextIndex, filteredCategorySuggestions.length - 1);
+      });
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setShowCategorySuggestions(true);
+      setHighlightedSuggestionIndex((currentIndex) => Math.max(currentIndex - 1, 0));
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      if (!showCategorySuggestions) {
+        return;
+      }
+
+      const suggestion = filteredCategorySuggestions[highlightedSuggestionIndex];
+      if (suggestion) {
+        event.preventDefault();
+        handleSelectCategory(suggestion.category);
+      }
+    }
+  }
+
+  const sortedExpenses = useMemo(() => {
+    const sorted = [...expenses];
+    sorted.sort((left, right) => {
+      const leftTime = Number.isFinite(Date.parse(left.date)) ? Date.parse(left.date) : 0;
+      const rightTime = Number.isFinite(Date.parse(right.date)) ? Date.parse(right.date) : 0;
+      return expenseSortOrder === 'newest' ? rightTime - leftTime : leftTime - rightTime;
+    });
+    return sorted;
+  }, [expenses, expenseSortOrder]);
 
   return (
     <div className="app-wrapper">
@@ -374,15 +583,15 @@ function App() {
               <form onSubmit={(event) => void handleExpenseSubmit(event)} className="expense-form">
                 <div className="form-row">
                   <div className="form-group">
-                    <label htmlFor="amount">Amount (paise)</label>
+                    <label htmlFor="amount">Amount (Rupees)</label>
                     <input
                       id="amount"
                       type="number"
                       value={amount}
                       onChange={(event) => setAmount(event.target.value)}
-                      placeholder="e.g., 500"
-                      min={1}
-                      step={1}
+                      placeholder="e.g., 10.50"
+                      min={0}
+                      step={0.01}
                       disabled={isExpenseSubmitting}
                       required
                     />
@@ -391,12 +600,18 @@ function App() {
                     <label htmlFor="category">Category</label>
                     <input 
                       id="category"
+                      list="category-list"
                       value={category} 
                       onChange={(event) => setCategory(event.target.value)} 
                       placeholder="e.g., Food, Transport"
                       disabled={isExpenseSubmitting}
                       required 
                     />
+                    <datalist id="category-list">
+                      {availableCategories.map((cat) => (
+                        <option key={cat} value={cat} />
+                      ))}
+                    </datalist>
                   </div>
                 </div>
 
@@ -435,12 +650,91 @@ function App() {
               <div className="card-header">
                 <h2>📊 My Expenses</h2>
                 <div className="filter-group">
-                  <input 
-                    value={categoryFilter} 
-                    onChange={(event) => setCategoryFilter(event.target.value)} 
-                    placeholder="Filter by category..."
-                    className="filter-input"
-                  />
+                  <div className="expense-controls">
+                    <div className="search-container" ref={categoryFilterContainerRef}>
+                      <input 
+                        value={categorySearchInput} 
+                        onChange={(event) => {
+                          setCategorySearchInput(event.target.value);
+                          setShowCategorySuggestions(true);
+                          setHighlightedSuggestionIndex(0);
+                        }}
+                        onFocus={() => setShowCategorySuggestions(true)}
+                        onKeyDown={handleCategorySearchKeyDown}
+                        placeholder="🔍 Search categories..."
+                        className="filter-input"
+                        aria-label="Search and filter expense categories"
+                      />
+                      {categorySearchInput && (
+                        <button
+                          type="button"
+                          className="clear-btn"
+                          onClick={handleClearFilter}
+                          title="Clear filter"
+                        >
+                          ✕
+                        </button>
+                      )}
+                      
+                      {showCategorySuggestions && filteredCategorySuggestions.length > 0 && (
+                        <div className="suggestions-dropdown" role="listbox" aria-label="Category suggestions">
+                          <div className="suggestions-header">
+                            <span className="suggestions-title">Available Categories ({availableCategories.length})</span>
+                            {categoryFilter && (
+                              <span className="active-filter">✓ Filtered by: <strong>{categoryFilter}</strong></span>
+                            )}
+                          </div>
+                          <ul className="suggestions-list">
+                            {filteredCategorySuggestions.map((suggestion, index) => (
+                              <li key={suggestion.category}>
+                                <button
+                                  type="button"
+                                  role="option"
+                                  aria-selected={categoryFilter === suggestion.category}
+                                  className={`suggestion-item ${categoryFilter === suggestion.category ? 'active' : ''} ${
+                                    index === highlightedSuggestionIndex ? 'highlighted' : ''
+                                  }`}
+                                  onClick={() => handleSelectCategory(suggestion.category)}
+                                  onMouseEnter={() => setHighlightedSuggestionIndex(index)}
+                                >
+                                  <span className="category-name">{renderCategorySuggestionLabel(suggestion)}</span>
+                                  {categoryFilter === suggestion.category && <span className="check-icon">✓</span>}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {showCategorySuggestions && categorySearchInput && filteredCategorySuggestions.length === 0 && (
+                        <div className="suggestions-dropdown" role="listbox" aria-label="Category suggestions">
+                          <div className="no-suggestions">
+                            No categories match "{categorySearchInput}"
+                          </div>
+                        </div>
+                      )}
+
+                      {showCategorySuggestions && !categorySearchInput && availableCategories.length === 0 && (
+                        <div className="suggestions-dropdown" role="listbox" aria-label="Category suggestions">
+                          <div className="no-suggestions">No categories yet. Add an expense to create one.</div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="sort-container">
+                      <label htmlFor="expense-sort" className="sort-label">Sort by date</label>
+                      <select
+                        id="expense-sort"
+                        className="sort-select"
+                        value={expenseSortOrder}
+                        onChange={(event) => setExpenseSortOrder(event.target.value as 'newest' | 'oldest')}
+                        aria-label="Sort expenses by date"
+                      >
+                        <option value="newest">Newest → Oldest</option>
+                        <option value="oldest">Oldest → Newest</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
               
@@ -449,10 +743,14 @@ function App() {
               </div>
 
               {isListLoading && <p className="loading">⏳ Loading expenses...</p>}
-              {!isListLoading && expenses.length === 0 && <p className="no-data">📭 No expenses found.</p>}
+              {!isListLoading && expenses.length === 0 && (
+                <p className="no-data">
+                  {categoryFilter ? `📭 No expenses found for "${categoryFilter}".` : '📭 No expenses found.'}
+                </p>
+              )}
               {!isListLoading && expenses.length > 0 && (
                 <ul className="expense-list">
-                  {expenses.map((expense) => (
+                  {sortedExpenses.map((expense) => (
                     <li key={expense._id} className="expense-item">
                       <div className="expense-info">
                         <div className="expense-header">
