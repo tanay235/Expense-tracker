@@ -41,11 +41,13 @@ export async function listExpensesController(req: Request, res: Response): Promi
 
   const page = Math.max(1, Number(req.query.page ?? 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20)));
+  const category = typeof req.query.category === 'string' ? req.query.category.trim() : undefined;
 
   const result = await listExpensesByUser({
     userId: authUser.userId,
     page,
     limit,
+    category,
   });
 
   res.status(200).json(result);

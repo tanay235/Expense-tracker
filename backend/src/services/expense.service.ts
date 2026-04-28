@@ -47,14 +47,26 @@ export async function listExpensesByUser(params: {
   userId: string;
   page: number;
   limit: number;
+  category?: string;
 }) {
-  const { userId, page, limit } = params;
+  const { userId, page, limit, category } = params;
   const normalizedUserId = new Types.ObjectId(userId);
+  // Filtering stays user-scoped first, then optional category narrows only that user's dataset.
+  const query: { user_id: Types.ObjectId; category?: string } = { user_id: normalizedUserId };
+  if (category) {
+    query.category = category;
+  }
 
   const skip = (page - 1) * limit;
   const [items, total] = await Promise.all([
-    ExpenseModel.find({ user_id: normalizedUserId }).sort({ date: -1, created_at: -1 }).skip(skip).limit(limit).lean(),
-    ExpenseModel.countDocuments({ user_id: normalizedUserId }),
+    // Newest-first ordering is deterministic using date desc with created_at as tie-breaker.
+    ExpenseModel.find(query)
+      // lean() avoids Mongoose document hydration overhead, keeping list responses efficient.
+      .sort({ date: -1, created_at: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    ExpenseModel.countDocuments(query),
   ]);
 
   return {
