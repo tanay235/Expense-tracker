@@ -18,10 +18,13 @@ const expenseSchema = new Schema(
   }
 );
 
-// category/date indexes support frequent filtering and time-ordered listing.
+// user_id index speeds up the primary access pattern: listing expenses for the logged-in user.
+expenseSchema.index({ user_id: 1 });
+// category index improves selective filtering when users query by expense category.
 expenseSchema.index({ category: 1 });
+// date descending index supports newest-first scans without in-memory sorting on large datasets.
 expenseSchema.index({ date: -1 });
-// Unique compound index enforces idempotent create per user.
+// Unique compound index prevents duplicate writes on retries by enforcing one key per user.
 expenseSchema.index({ idempotency_key: 1, user_id: 1 }, { unique: true });
 
 export type ExpenseDocument = InferSchemaType<typeof expenseSchema>;
