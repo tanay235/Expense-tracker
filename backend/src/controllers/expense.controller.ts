@@ -18,7 +18,14 @@ export async function createExpenseController(req: Request, res: Response): Prom
 
   const parsed = createExpenseSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ message: 'Invalid expense payload', errors: parsed.error.flatten() });
+    // Clear field-level validation errors help clients fix bad requests quickly and avoid retrying invalid payloads.
+    res.status(400).json({
+      message: 'Validation failed',
+      errors: parsed.error.issues.map((issue) => ({
+        field: issue.path.join('.') || 'body',
+        message: issue.message,
+      })),
+    });
     return;
   }
 
