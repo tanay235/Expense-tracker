@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import './style.css';
 
 type Expense = {
   _id: string;
@@ -31,6 +32,8 @@ type ExpenseSummaryResponse = {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000';
 const TOKEN_STORAGE_KEY = 'expense_tracker_token';
+const USER_NAME_STORAGE_KEY = 'expense_tracker_user_name';
+const USER_EMAIL_STORAGE_KEY = 'expense_tracker_user_email';
 
 function formatRupeesFromPaise(paise: number): string {
   return `Rs. ${(paise / 100).toFixed(2)}`;
@@ -61,15 +64,23 @@ async function apiRequest<T>(path: string, options: RequestInit = {}, token?: st
 
 function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY));
+  const [userName, setUserName] = useState<string | null>(() => localStorage.getItem(USER_NAME_STORAGE_KEY));
+  const [userEmail, setUserEmail] = useState<string | null>(() => localStorage.getItem(USER_EMAIL_STORAGE_KEY));
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  
+  // Auth form fields
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
+  // Expense form fields
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState('');
 
+  // UI state
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summaryByCategory, setSummaryByCategory] = useState<ExpenseSummaryRow[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -130,25 +141,48 @@ function App() {
 
     try {
       if (authMode === 'register') {
+        if (password !== confirmPassword) {
+          setRequestError('Passwords do not match');
+          setIsAuthSubmitting(false);
+          return;
+        }
+
+        if (!name.trim()) {
+          setRequestError('Name is required');
+          setIsAuthSubmitting(false);
+          return;
+        }
+
         await apiRequest<{ userId: string }>('/auth/register', {
           method: 'POST',
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ name: name.trim(), email, password }),
         });
-        setStatusMessage('Registration successful. Please login.');
+        setStatusMessage('✓ Registration successful! Please login.');
         setAuthMode('login');
+        setName('');
+        setEmail('');
         setPassword('');
+        setConfirmPassword('');
         return;
       }
 
-      const result = await apiRequest<{ token: string }>('/auth/login', {
+      const result = await apiRequest<{ token: string; name: string; email: string }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
 
       localStorage.setItem(TOKEN_STORAGE_KEY, result.token);
+      localStorage.setItem(USER_NAME_STORAGE_KEY, result.name);
+      localStorage.setItem(USER_EMAIL_STORAGE_KEY, result.email);
+      
       setToken(result.token);
-      setStatusMessage('Login successful.');
+      setUserName(result.name);
+      setUserEmail(result.email);
+      setStatusMessage(`✓ Welcome ${result.name}!`);
+      setEmail('');
       setPassword('');
+      setName('');
+      setConfirmPassword('');
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Authentication failed');
     } finally {
@@ -188,7 +222,7 @@ function App() {
       setCategory('');
       setDescription('');
       setDate('');
-      setStatusMessage('Expense added.');
+      setStatusMessage('✓ Expense added successfully!');
       await loadExpenses(token, categoryFilter);
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : 'Failed to add expense');
@@ -201,132 +235,262 @@ function App() {
 
   function handleLogout(): void {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(USER_NAME_STORAGE_KEY);
+    localStorage.removeItem(USER_EMAIL_STORAGE_KEY);
     setToken(null);
-    setStatusMessage('Logged out.');
+    setUserName(null);
+    setUserEmail(null);
+    setStatusMessage('✓ Logged out successfully.');
     setRequestError('');
   }
 
   return (
-    <main className="container">
-      <h1>Expense Tracker</h1>
+    <div className="app-wrapper">
+      <main className="container">
+        {!token ? (
+          <div className="auth-container">
+            <div className="auth-card">
+              <div className="auth-header">
+                <h1>💰 Expense Tracker</h1>
+                <p className="subtitle">{authMode === 'login' ? 'Welcome back!' : 'Create your account'}</p>
+              </div>
 
-      {!token ? (
-        <section className="card">
-          <h2>{authMode === 'login' ? 'Login' : 'Register'}</h2>
-          <form onSubmit={(event) => void handleAuthSubmit(event)} className="form-grid">
-            <label>
-              Email
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                minLength={8}
-                required
-              />
-            </label>
-            <button type="submit" disabled={isAuthSubmitting}>
-              {isAuthSubmitting ? 'Please wait...' : authMode === 'login' ? 'Login' : 'Create account'}
-            </button>
-          </form>
-          <button
-            type="button"
-            className="link-button"
-            disabled={isAuthSubmitting}
-            onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
-          >
-            {authMode === 'login' ? 'Need an account? Register' : 'Already have an account? Login'}
-          </button>
-        </section>
-      ) : (
-        <>
-          <section className="card">
-            <div className="row between">
-              <h2>Add Expense</h2>
-              <button type="button" onClick={handleLogout}>
-                Logout
+              <form onSubmit={(event) => void handleAuthSubmit(event)} className="auth-form">
+                {authMode === 'register' && (
+                  <div className="form-group">
+                    <label htmlFor="name">Full Name</label>
+                    <input 
+                      id="name"
+                      type="text" 
+                      value={name} 
+                      onChange={(event) => setName(event.target.value)} 
+                      placeholder="Enter your name"
+                      disabled={isAuthSubmitting}
+                      required 
+                    />
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label htmlFor="email">Email Address</label>
+                  <input 
+                    id="email"
+                    type="email" 
+                    value={email} 
+                    onChange={(event) => setEmail(event.target.value)} 
+                    placeholder="Enter your email"
+                    disabled={isAuthSubmitting}
+                    required 
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="password">Password</label>
+                  <input 
+                    id="password"
+                    type="password" 
+                    value={password} 
+                    onChange={(event) => setPassword(event.target.value)} 
+                    placeholder={authMode === 'register' ? 'Min 8 characters' : 'Enter your password'}
+                    minLength={authMode === 'register' ? 8 : 1}
+                    disabled={isAuthSubmitting}
+                    required 
+                  />
+                </div>
+
+                {authMode === 'register' && (
+                  <div className="form-group">
+                    <label htmlFor="confirmPassword">Confirm Password</label>
+                    <input 
+                      id="confirmPassword"
+                      type="password" 
+                      value={confirmPassword} 
+                      onChange={(event) => setConfirmPassword(event.target.value)} 
+                      placeholder="Confirm your password"
+                      minLength={8}
+                      disabled={isAuthSubmitting}
+                      required 
+                    />
+                  </div>
+                )}
+
+                <button type="submit" className="btn-primary" disabled={isAuthSubmitting}>
+                  {isAuthSubmitting ? '⏳ Please wait...' : authMode === 'login' ? '🔓 Login' : '✏️ Create Account'}
+                </button>
+              </form>
+
+              <div className="auth-toggle">
+                <p>
+                  {authMode === 'login' 
+                    ? "Don't have an account? " 
+                    : "Already have an account? "}
+                  <button
+                    type="button"
+                    className="toggle-link"
+                    disabled={isAuthSubmitting}
+                    onClick={() => {
+                      setAuthMode(authMode === 'login' ? 'register' : 'login');
+                      setName('');
+                      setEmail('');
+                      setPassword('');
+                      setConfirmPassword('');
+                      setRequestError('');
+                      setStatusMessage('');
+                    }}
+                  >
+                    {authMode === 'login' ? 'Register here' : 'Login here'}
+                  </button>
+                </p>
+              </div>
+
+              {statusMessage && <div className="alert alert-success">{statusMessage}</div>}
+              {requestError && <div className="alert alert-error">{requestError}</div>}
+            </div>
+          </div>
+        ) : (
+          <div className="dashboard">
+            {/* Welcome Section */}
+            <div className="welcome-card">
+              <div className="welcome-content">
+                <h1>👋 Welcome, {userName}!</h1>
+                <p className="user-email">{userEmail}</p>
+              </div>
+              <button 
+                type="button" 
+                className="btn-secondary"
+                onClick={handleLogout}
+              >
+                🚪 Logout
               </button>
             </div>
-            <form onSubmit={(event) => void handleExpenseSubmit(event)} className="form-grid">
-              <label>
-                Amount (paise)
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
-                  min={1}
-                  step={1}
-                  required
-                />
-              </label>
-              <label>
-                Category
-                <input value={category} onChange={(event) => setCategory(event.target.value)} required />
-              </label>
-              <label>
-                Description
-                <input value={description} onChange={(event) => setDescription(event.target.value)} />
-              </label>
-              <label>
-                Date
-                <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
-              </label>
-              <button type="submit" disabled={isExpenseSubmitting}>
-                {isExpenseSubmitting ? 'Saving...' : 'Add expense'}
-              </button>
-            </form>
-          </section>
 
-          <section className="card">
-            <div className="row between">
-              <h2>My Expenses</h2>
-              <label>
-                Filter category
-                <input value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} placeholder="e.g. Food" />
-              </label>
-            </div>
-            <p className="total">Total (current list): {formatRupeesFromPaise(totalPaise)}</p>
+            {/* Status Messages */}
+            {statusMessage && <div className="alert alert-success">{statusMessage}</div>}
+            {requestError && <div className="alert alert-error">{requestError}</div>}
 
-            {isListLoading ? <p>Loading expenses...</p> : null}
-            {!isListLoading && expenses.length === 0 ? <p>No expenses found.</p> : null}
-            {!isListLoading && expenses.length > 0 ? (
-              <ul className="expense-list">
-                {expenses.map((expense) => (
-                  <li key={expense._id}>
-                    <div>
-                      <strong>{expense.category}</strong> - {formatRupeesFromPaise(expense.amount)}
-                      <div className="muted">{expense.description || 'No description'}</div>
-                    </div>
-                    <span>{new Date(expense.date).toLocaleDateString()}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
+            {/* Add Expense Section */}
+            <section className="card expense-form-card">
+              <h2>➕ Add Expense</h2>
+              <form onSubmit={(event) => void handleExpenseSubmit(event)} className="expense-form">
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="amount">Amount (paise)</label>
+                    <input
+                      id="amount"
+                      type="number"
+                      value={amount}
+                      onChange={(event) => setAmount(event.target.value)}
+                      placeholder="e.g., 500"
+                      min={1}
+                      step={1}
+                      disabled={isExpenseSubmitting}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="category">Category</label>
+                    <input 
+                      id="category"
+                      value={category} 
+                      onChange={(event) => setCategory(event.target.value)} 
+                      placeholder="e.g., Food, Transport"
+                      disabled={isExpenseSubmitting}
+                      required 
+                    />
+                  </div>
+                </div>
 
-          <section className="card">
-            <h2>Summary by Category</h2>
-            {!isListLoading && summaryByCategory.length === 0 ? <p>No summary data yet.</p> : null}
-            {!isListLoading && summaryByCategory.length > 0 ? (
-              <ul className="expense-list">
-                {summaryByCategory.map((entry) => (
-                  <li key={entry.category}>
-                    <strong>{entry.category}</strong>
-                    <span>{formatRupeesFromPaise(entry.total)}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
-        </>
-      )}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="description">Description</label>
+                    <input 
+                      id="description"
+                      value={description} 
+                      onChange={(event) => setDescription(event.target.value)} 
+                      placeholder="Optional"
+                      disabled={isExpenseSubmitting}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="date">Date</label>
+                    <input 
+                      id="date"
+                      type="date" 
+                      value={date} 
+                      onChange={(event) => setDate(event.target.value)} 
+                      disabled={isExpenseSubmitting}
+                      required 
+                    />
+                  </div>
+                </div>
 
-      {statusMessage ? <p className="success">{statusMessage}</p> : null}
-      {requestError ? <p className="error">{requestError}</p> : null}
-    </main>
+                <button type="submit" className="btn-primary" disabled={isExpenseSubmitting}>
+                  {isExpenseSubmitting ? '💾 Saving...' : '📝 Add Expense'}
+                </button>
+              </form>
+            </section>
+
+            {/* Expenses List */}
+            <section className="card expenses-card">
+              <div className="card-header">
+                <h2>📊 My Expenses</h2>
+                <div className="filter-group">
+                  <input 
+                    value={categoryFilter} 
+                    onChange={(event) => setCategoryFilter(event.target.value)} 
+                    placeholder="Filter by category..."
+                    className="filter-input"
+                  />
+                </div>
+              </div>
+              
+              <div className="total-box">
+                <strong>Total: {formatRupeesFromPaise(totalPaise)}</strong>
+              </div>
+
+              {isListLoading && <p className="loading">⏳ Loading expenses...</p>}
+              {!isListLoading && expenses.length === 0 && <p className="no-data">📭 No expenses found.</p>}
+              {!isListLoading && expenses.length > 0 && (
+                <ul className="expense-list">
+                  {expenses.map((expense) => (
+                    <li key={expense._id} className="expense-item">
+                      <div className="expense-info">
+                        <div className="expense-header">
+                          <strong className="expense-category">{expense.category}</strong>
+                          <span className="expense-amount">{formatRupeesFromPaise(expense.amount)}</span>
+                        </div>
+                        <div className="expense-description">
+                          {expense.description || 'No description'}
+                        </div>
+                        <div className="expense-date">
+                          📅 {new Date(expense.date).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {/* Summary */}
+            <section className="card summary-card">
+              <h2>📈 Summary by Category</h2>
+              {!isListLoading && summaryByCategory.length === 0 && <p className="no-data">📭 No summary data yet.</p>}
+              {!isListLoading && summaryByCategory.length > 0 && (
+                <ul className="summary-list">
+                  {summaryByCategory.map((entry) => (
+                    <li key={entry.category} className="summary-item">
+                      <span className="summary-category">{entry.category}</span>
+                      <span className="summary-total">{formatRupeesFromPaise(entry.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
 

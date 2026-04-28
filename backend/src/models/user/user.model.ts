@@ -2,6 +2,7 @@ import { InferSchemaType, Schema, model } from 'mongoose';
 
 const userSchema = new Schema(
   {
+    name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, trim: true, lowercase: true },
     // Passwords must be stored as hashes so a DB leak does not expose user credentials in plaintext.
     password_hash: { type: String, required: true },

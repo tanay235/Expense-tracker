@@ -18,6 +18,7 @@ export async function registerUser(input: RegisterInput): Promise<{ userId: stri
   const passwordHash = await bcrypt.hash(input.password, PASSWORD_SALT_ROUNDS);
 
   const created = await UserModel.create({
+    name: input.name,
     email: input.email,
     password_hash: passwordHash,
   });
@@ -25,7 +26,7 @@ export async function registerUser(input: RegisterInput): Promise<{ userId: stri
   return { userId: created._id.toString() };
 }
 
-export async function loginUser(input: LoginInput): Promise<{ token: string }> {
+export async function loginUser(input: LoginInput): Promise<{ token: string; name: string; email: string }> {
   const user = await UserModel.findOne({ email: input.email });
   if (!user) {
     throw new Error('INVALID_CREDENTIALS');
@@ -39,7 +40,7 @@ export async function loginUser(input: LoginInput): Promise<{ token: string }> {
   // Short-lived JWTs reduce risk if a token is leaked and force periodic re-authentication.
   // HS256 is explicitly pinned and the signing key is loaded from env to avoid hardcoded secrets in code.
   const token = jwt.sign(
-    { sub: user._id.toString(), email: user.email },
+    { sub: user._id.toString(), email: user.email, name: user.name },
     config.jwtSecret,
     {
       algorithm: 'HS256',
@@ -47,5 +48,5 @@ export async function loginUser(input: LoginInput): Promise<{ token: string }> {
     }
   );
 
-  return { token };
+  return { token, name: user.name, email: user.email };
 }
