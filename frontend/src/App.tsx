@@ -88,6 +88,13 @@ function App() {
   const [showCategorySuggestions, setShowCategorySuggestions] = useState(false);
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
   const [expenseSortOrder, setExpenseSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [showAddCategorySuggestions, setShowAddCategorySuggestions] = useState(false);
+  const [highlightedAddCategoryIndex, setHighlightedAddCategoryIndex] = useState(-1);
+  const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
+  const [summarySelectedCategory, setSummarySelectedCategory] = useState<string | null>(null);
+  const [summaryCategoryExpenses, setSummaryCategoryExpenses] = useState<Expense[]>([]);
+  const [isSummaryCategoryLoading, setIsSummaryCategoryLoading] = useState(false);
+  const [summaryCategoryError, setSummaryCategoryError] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [isListLoading, setIsListLoading] = useState(false);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
@@ -95,6 +102,7 @@ function App() {
   const [requestError, setRequestError] = useState('');
 
   const categoryFilterContainerRef = useRef<HTMLDivElement | null>(null);
+  const addExpenseCategoryContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Local component state is enough here because auth + expense data are used on a single page.
   // This keeps the frontend simple and avoids introducing global state tooling prematurely.
@@ -138,6 +146,36 @@ function App() {
     };
   }, [showCategorySuggestions]);
 
+  useEffect(() => {
+    if (!showAddCategorySuggestions) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent): void => {
+      const container = addExpenseCategoryContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const targetNode = event.target as Node | null;
+      if (!targetNode) {
+        return;
+      }
+
+      if (!container.contains(targetNode)) {
+        setShowAddCategorySuggestions(false);
+        setHighlightedAddCategoryIndex(-1);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [showAddCategorySuggestions]);
+
   async function loadExpenses(authToken: string, selectedCategory: string): Promise<void> {
     setIsListLoading(true);
     setRequestError('');
@@ -164,6 +202,27 @@ function App() {
     } finally {
       setIsListLoading(false);
     }
+  }
+
+  async function loadAllExpensesForCategory(authToken: string, selectedCategory: string): Promise<Expense[]> {
+    const allItems: Expense[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const query = new URLSearchParams({
+        category: selectedCategory,
+        page: String(page),
+        limit: '100',
+      });
+
+      const result = await apiRequest<ExpenseListResponse>(`/expenses?${query.toString()}`, { method: 'GET' }, authToken);
+      allItems.push(...result.items);
+      totalPages = result.pagination.totalPages;
+      page += 1;
+    }
+
+    return allItems;
   }
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -347,6 +406,58 @@ function App() {
     return matches.map(({ category, matchIndex, matchLength }) => ({ category, matchIndex, matchLength }));
   }, [availableCategories, categorySearchInput]);
 
+  const addExpenseCategorySuggestions = useMemo<CategorySuggestion[]>(() => {
+    const trimmedSearch = category.trim();
+    if (!trimmedSearch) {
+      return availableCategories.map((categoryName) => ({ category: categoryName, matchIndex: -1, matchLength: 0 }));
+    }
+
+    const searchTerm = trimmedSearch.toLowerCase();
+    const matches: Array<CategorySuggestion & { score: number; matchOffset: number }> = [];
+
+    for (const categoryName of availableCategories) {
+      const normalizedCategory = categoryName.toLowerCase();
+      const matchIndex = normalizedCategory.indexOf(searchTerm);
+      if (matchIndex === -1) {
+        continue;
+      }
+
+      let score = 3;
+      if (matchIndex === 0) {
+        score = normalizedCategory.length === searchTerm.length ? 0 : 1;
+      } else {
+        const prevChar = normalizedCategory[matchIndex - 1];
+        if (prevChar === ' ' || prevChar === '-' || prevChar === '_' || prevChar === '/') {
+          score = 2;
+        }
+      }
+
+      matches.push({
+        category: categoryName,
+        matchIndex,
+        matchLength: searchTerm.length,
+        score,
+        matchOffset: matchIndex,
+      });
+    }
+
+    matches.sort((left, right) => {
+      if (left.score !== right.score) {
+        return left.score - right.score;
+      }
+      if (left.matchOffset !== right.matchOffset) {
+        return left.matchOffset - right.matchOffset;
+      }
+      return left.category.localeCompare(right.category, undefined, { sensitivity: 'base' });
+    });
+
+    return matches.map(({ category: categoryName, matchIndex, matchLength }) => ({
+      category: categoryName,
+      matchIndex,
+      matchLength,
+    }));
+  }, [availableCategories, category]);
+
   useEffect(() => {
     if (!showCategorySuggestions) {
       return;
@@ -362,6 +473,22 @@ function App() {
       return Math.min(currentIndex, filteredCategorySuggestions.length - 1);
     });
   }, [filteredCategorySuggestions, showCategorySuggestions]);
+
+  useEffect(() => {
+    if (!showAddCategorySuggestions) {
+      return;
+    }
+
+    setHighlightedAddCategoryIndex((currentIndex) => {
+      if (addExpenseCategorySuggestions.length === 0) {
+        return -1;
+      }
+      if (currentIndex < 0) {
+        return 0;
+      }
+      return Math.min(currentIndex, addExpenseCategorySuggestions.length - 1);
+    });
+  }, [addExpenseCategorySuggestions, showAddCategorySuggestions]);
 
   function handleLogout(): void {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -386,6 +513,48 @@ function App() {
     setCategorySearchInput('');
     setShowCategorySuggestions(false);
     setHighlightedSuggestionIndex(-1);
+  }
+
+  async function handleOpenSummaryCategory(categoryName: string): Promise<void> {
+    if (!token) {
+      return;
+    }
+
+    setIsSummaryModalOpen(true);
+    setSummarySelectedCategory(categoryName);
+    setSummaryCategoryExpenses([]);
+    setSummaryCategoryError('');
+    setIsSummaryCategoryLoading(true);
+
+    try {
+      const items = await loadAllExpensesForCategory(token, categoryName);
+      items.sort((left, right) => {
+        const leftTime = Number.isFinite(Date.parse(left.date)) ? Date.parse(left.date) : 0;
+        const rightTime = Number.isFinite(Date.parse(right.date)) ? Date.parse(right.date) : 0;
+        return rightTime - leftTime;
+      });
+      setSummaryCategoryExpenses(items);
+    } catch (error) {
+      setSummaryCategoryError(error instanceof Error ? error.message : 'Failed to load category transactions');
+    } finally {
+      setIsSummaryCategoryLoading(false);
+    }
+  }
+
+  function handleCloseSummaryModal(): void {
+    setIsSummaryModalOpen(false);
+    setSummarySelectedCategory(null);
+    setSummaryCategoryExpenses([]);
+    setSummaryCategoryError('');
+    setIsSummaryCategoryLoading(false);
+  }
+
+  function handleApplySummaryCategoryFilter(): void {
+    if (!summarySelectedCategory) {
+      return;
+    }
+    handleSelectCategory(summarySelectedCategory);
+    handleCloseSummaryModal();
   }
 
   function renderCategorySuggestionLabel(suggestion: CategorySuggestion): ReactNode {
@@ -439,6 +608,49 @@ function App() {
       if (suggestion) {
         event.preventDefault();
         handleSelectCategory(suggestion.category);
+      }
+    }
+  }
+
+  function handleAddExpenseCategorySelect(selectedCategory: string): void {
+    setCategory(selectedCategory);
+    setShowAddCategorySuggestions(false);
+    setHighlightedAddCategoryIndex(-1);
+  }
+
+  function handleAddExpenseCategoryKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === 'Escape') {
+      setShowAddCategorySuggestions(false);
+      setHighlightedAddCategoryIndex(-1);
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setShowAddCategorySuggestions(true);
+      setHighlightedAddCategoryIndex((currentIndex) => {
+        const nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
+        return Math.min(nextIndex, addExpenseCategorySuggestions.length - 1);
+      });
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setShowAddCategorySuggestions(true);
+      setHighlightedAddCategoryIndex((currentIndex) => Math.max(currentIndex - 1, 0));
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      if (!showAddCategorySuggestions) {
+        return;
+      }
+
+      const suggestion = addExpenseCategorySuggestions[highlightedAddCategoryIndex];
+      if (suggestion) {
+        event.preventDefault();
+        handleAddExpenseCategorySelect(suggestion.category);
       }
     }
   }
@@ -598,20 +810,51 @@ function App() {
                   </div>
                   <div className="form-group">
                     <label htmlFor="category">Category</label>
-                    <input 
-                      id="category"
-                      list="category-list"
-                      value={category} 
-                      onChange={(event) => setCategory(event.target.value)} 
-                      placeholder="e.g., Food, Transport"
-                      disabled={isExpenseSubmitting}
-                      required 
-                    />
-                    <datalist id="category-list">
-                      {availableCategories.map((cat) => (
-                        <option key={cat} value={cat} />
-                      ))}
-                    </datalist>
+                    <div className="search-container" ref={addExpenseCategoryContainerRef}>
+                      <input 
+                        id="category"
+                        value={category} 
+                        onChange={(event) => {
+                          setCategory(event.target.value);
+                          setShowAddCategorySuggestions(true);
+                          setHighlightedAddCategoryIndex(0);
+                        }} 
+                        onFocus={() => setShowAddCategorySuggestions(true)}
+                        onKeyDown={handleAddExpenseCategoryKeyDown}
+                        placeholder="e.g., Food, Transport"
+                        disabled={isExpenseSubmitting}
+                        required 
+                      />
+
+                      {showAddCategorySuggestions && addExpenseCategorySuggestions.length > 0 && (
+                        <div className="suggestions-dropdown suggestions-dropdown--form" role="listbox" aria-label="Category suggestions">
+                          <div className="suggestions-header">
+                            <span className="suggestions-title">Categories ({availableCategories.length})</span>
+                          </div>
+                          <ul className="suggestions-list">
+                            {addExpenseCategorySuggestions.map((suggestion, index) => (
+                              <li key={suggestion.category}>
+                                <button
+                                  type="button"
+                                  role="option"
+                                  className={`suggestion-item ${index === highlightedAddCategoryIndex ? 'highlighted' : ''}`}
+                                  onClick={() => handleAddExpenseCategorySelect(suggestion.category)}
+                                  onMouseEnter={() => setHighlightedAddCategoryIndex(index)}
+                                >
+                                  <span className="category-name">{renderCategorySuggestionLabel(suggestion)}</span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {showAddCategorySuggestions && category && addExpenseCategorySuggestions.length === 0 && (
+                        <div className="suggestions-dropdown suggestions-dropdown--form" role="listbox" aria-label="Category suggestions">
+                          <div className="no-suggestions">No categories match "{category}"</div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -778,13 +1021,71 @@ function App() {
                 <ul className="summary-list">
                   {summaryByCategory.map((entry) => (
                     <li key={entry.category} className="summary-item">
-                      <span className="summary-category">{entry.category}</span>
-                      <span className="summary-total">{formatRupeesFromPaise(entry.total)}</span>
+                      <button
+                        type="button"
+                        className="summary-item-button"
+                        onClick={() => void handleOpenSummaryCategory(entry.category)}
+                        aria-label={`View transactions for ${entry.category}`}
+                      >
+                        <span className="summary-category">{entry.category}</span>
+                        <span className="summary-total">{formatRupeesFromPaise(entry.total)}</span>
+                      </button>
                     </li>
                   ))}
                 </ul>
               )}
             </section>
+
+            {isSummaryModalOpen && (
+              <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Category transactions">
+                <div className="modal-content">
+                  <div className="modal-header">
+                    <div>
+                      <h3 className="modal-title">Transactions: {summarySelectedCategory ?? ''}</h3>
+                      <p className="modal-subtitle">Sorted newest → oldest</p>
+                    </div>
+                    <button type="button" className="modal-close" onClick={handleCloseSummaryModal} aria-label="Close">
+                      ✕
+                    </button>
+                  </div>
+
+                  {summaryCategoryError && <div className="alert alert-error">{summaryCategoryError}</div>}
+                  {isSummaryCategoryLoading && <p className="loading">⏳ Loading transactions...</p>}
+
+                  {!isSummaryCategoryLoading && !summaryCategoryError && summaryCategoryExpenses.length === 0 && (
+                    <p className="no-data">📭 No transactions found.</p>
+                  )}
+
+                  {!isSummaryCategoryLoading && !summaryCategoryError && summaryCategoryExpenses.length > 0 && (
+                    <ul className="modal-expense-list">
+                      {summaryCategoryExpenses.map((expense) => (
+                        <li key={expense._id} className="modal-expense-item">
+                          <div className="modal-expense-main">
+                            <strong className="modal-expense-amount">{formatRupeesFromPaise(expense.amount)}</strong>
+                            <span className="modal-expense-date">📅 {new Date(expense.date).toLocaleDateString()}</span>
+                          </div>
+                          <div className="modal-expense-desc">{expense.description || 'No description'}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={handleApplySummaryCategoryFilter}
+                      disabled={!summarySelectedCategory}
+                    >
+                      Filter main list
+                    </button>
+                    <button type="button" className="btn-primary" onClick={handleCloseSummaryModal}>
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
