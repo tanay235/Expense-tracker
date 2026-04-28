@@ -18,6 +18,7 @@ export const config = {
   dbName: process.env.DB_NAME ?? 'expense_tracker',
   jwtSecret: requireEnv('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '1h',
+  expensePostLimitPerMinute: parseInt(process.env.EXPENSE_POST_LIMIT_PER_MINUTE ?? '30', 10),
   isDev: (process.env.NODE_ENV ?? 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production'
 } as const;
