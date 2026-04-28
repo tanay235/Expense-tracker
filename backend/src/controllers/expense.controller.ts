@@ -39,8 +39,10 @@ export async function listExpensesController(req: Request, res: Response): Promi
     return;
   }
 
-  const page = Math.max(1, Number(req.query.page ?? 1));
-  const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20)));
+  const parsedPage = Number(req.query.page ?? 1);
+  const parsedLimit = Number(req.query.limit ?? 20);
+  const page = Number.isFinite(parsedPage) ? Math.max(1, Math.floor(parsedPage)) : 1;
+  const limit = Number.isFinite(parsedLimit) ? Math.min(100, Math.max(1, Math.floor(parsedLimit))) : 20;
   const category = typeof req.query.category === 'string' ? req.query.category.trim() : undefined;
 
   const result = await listExpensesByUser({

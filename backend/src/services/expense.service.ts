@@ -57,11 +57,13 @@ export async function listExpensesByUser(params: {
     query.category = category;
   }
 
+  // Pagination is essential for scalability: we never load an unbounded result set into memory.
   const skip = (page - 1) * limit;
   const [items, total] = await Promise.all([
     // Newest-first ordering is deterministic using date desc with created_at as tie-breaker.
     ExpenseModel.find(query)
       // lean() avoids Mongoose document hydration overhead, keeping list responses efficient.
+      // skip() moves the read window to the requested page, and limit() caps rows returned per request.
       .sort({ date: -1, created_at: -1 })
       .skip(skip)
       .limit(limit)
