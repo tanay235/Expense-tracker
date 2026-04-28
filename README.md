@@ -5,6 +5,9 @@ A production-focused full-stack Expense Tracker built with the MERN stack — em
 > Built for real-world conditions: unreliable networks, browser refreshes, and client retries.
 
 ---
+## deploy link:
+https://expense-tracker-lemon-tau.vercel.app/
+
 ## Demo Video
 https://drive.google.com/file/d/1GrYkx29mePZHk8m7o6oE8yRZbRw4hAzI/view?usp=sharing
 ---
