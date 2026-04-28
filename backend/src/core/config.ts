@@ -17,7 +17,7 @@ export const config = {
   mongoUri: requireEnv('MONGODB_URI'),
   dbName: process.env.DB_NAME ?? 'expense_tracker',
   jwtSecret: requireEnv('JWT_SECRET'),
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '1h',
   isDev: (process.env.NODE_ENV ?? 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production'
 } as const;
